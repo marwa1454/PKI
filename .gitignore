@@ -16,9 +16,27 @@ __pycache__/
 *.pyc
 
 # Certificats et clés privées
+certs/user-certs/        # Certificats clients générés
+certs/temp/              # Certificats temporaires
+
+# 🔒 JAMAIS COMMITTER LA ROOT CA!
+root-ca.key              # Root CA clé privée (garder local)
+root-ca.crt              # Root CA certificat (optional - keep local)
+root-ca.csr
+root-ca.srl
+root-ca-config.txt
+
+# EJBCA Root CA - JAMAIS EXPOSER!
+ANC-Root-CA.pem          # ⚠️ Root CA - JAMAIS EN GIT
+ANCRootCA.pem            # ⚠️ Root CA - JAMAIS EN GIT
+certs/*Root*.pem         # Tous les Root CA
+certs/*root*.key
+
+# ✅ OK à committer (Sub-CA signé par Root CA local)
+# sub-ca.key              # À décommenter si vous voulez pousser Sub-CA
+# sub-ca.crt              # À décommenter si vous voulez pousser Sub-CA
+
+# Fichiers client temporaires
 *.p12
-*.pem
-*.key
-*.crt
-certs/*.p12
-certs/*.pem
+client-certs/
+temp-certs/
