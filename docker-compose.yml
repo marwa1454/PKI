@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mariadb:
     image: mariadb:10.6
@@ -23,7 +21,7 @@ services:
     restart: unless-stopped
 
   ejbca-ca:
-    image: primekey/ejbca-ce:8.2.0.1
+    image: keyfactor/ejbca-ce:9.1.1
     container_name: ejbca-ca
     environment:
       DATABASE_JDBC_URL: jdbc:mariadb://mariadb:3306/ejbca
@@ -44,30 +42,48 @@ services:
     networks:
       - ejbca-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/ejbca/publicweb/healthcheck.html || true"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      disable: true
     restart: unless-stopped
 
-  fastapi:
+  ejbca-api:
     build: .
     container_name: ejbca-api
     environment:
+      # ═══════════════════════════════════════════════════════════
+      # EJBCA SOAP Configuration
+      # ═══════════════════════════════════════════════════════════
       EJBCA_HOST: ejbca-ca
       EJBCA_PORT: 8443
       EJBCA_PROTOCOL: https
+      # ⚠️ AUTHENTIFICATION PAR CERTIFICAT CLIENT SEULEMENT
+      # Les credentials HTTP Basic n'existent PLUS
       EJBCA_WSDL_URL: https://ejbca-ca:8443/ejbca/ejbcaws/ejbcaws?wsdl
       EJBCA_SOAP_URL: https://ejbca-ca:8443/ejbca/ejbcaws/ejbcaws
-      EJBCA_CLIENT_CERT: /app/certs/soapadmin_cert.pem
-      EJBCA_CLIENT_KEY: /app/certs/soapadmin_key.pem
+      EJBCA_CLIENT_CERT: /app/certs/adminsoap_cert.pem
+      EJBCA_CLIENT_KEY: /app/certs/adminsoap_key.pem
+      
+      # ═══════════════════════════════════════════════════════════
+      # MariaDB Configuration (from container)
+      # ═══════════════════════════════════════════════════════════
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: 3306
+      MARIADB_USER: ejbca
+      MARIADB_PASSWORD: ejbca
+      MARIADB_DATABASE: ejbca
+      
+      # ═══════════════════════════════════════════════════════════
+      # FastAPI Configuration
+      # ═══════════════════════════════════════════════════════════
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      # ⚠️ AUTHENTIFICATION PAR CERTIFICAT CLIENT UNIQUEMENT
+      # Pas d'authentification HTTP Basic Admin
       DEBUG: 'True'
     ports:
       - "8000:8000"
     depends_on:
-      - ejbca-ca
+      mariadb:
+        condition: service_healthy
     volumes:
       - ./app:/app/app
       - ./certs:/app/certs

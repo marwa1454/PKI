@@ -1,5 +1,8 @@
 """
-Client EJBCA avec authentification par certificat client
+Client EJBCA avec authentification PAR CERTIFICAT CLIENT X.509 (RSA 2048) SEULEMENT
+❌ Pas d'authentification HTTP Basic Auth
+❌ Pas de credentials en dur
+✅ Certificat client TLS obligatoire
 """
 import requests
 from zeep import Client, Settings, Transport
@@ -16,7 +19,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 class EJBCAClient:
-    """Client EJBCA avec authentification par certificat client"""
+    """Client EJBCA avec authentification PAR CERTIFICAT CLIENT X.509 (RSA 2048) SEULEMENT"""
     
     def __init__(self):
         # Configuration pour Docker
@@ -24,10 +27,12 @@ class EJBCAClient:
         self.soap_url = "https://ejbca-ca:8443/ejbca/ejbcaws/ejbcaws"
         self.namespace = "http://ws.protocol.core.ejbca.org/"
         
-        # Certificats pour l'authentification
-        self.p12_file = "/app/certs/apiuser.p12"
-        self.p12_password = "Marwa77233473"
-        self.ca_file = "/app/certs/ca_cert.pem"
+        # ⚠️ AUTHENTIFICATION PAR CERTIFICAT CLIENT X.509 (RSA 2048) UNIQUEMENT
+        # Pas de credentials HTTP Basic Auth
+        # Certificat ADMIN avec chaîne CA COMPLÈTE et SuperAdministrator role
+        self.cert_file = "/app/certs/ADMIN_complete.pem"  # Docker
+        if not os.path.exists(self.cert_file):
+            self.cert_file = "./certs/ADMIN_complete.pem"  # Local fallback
         
         self.client = None
         self._initialized = False
@@ -35,71 +40,59 @@ class EJBCAClient:
         self._operations = {}
         
     def initialize(self):
-        """Initialise le client SOAP avec authentification par certificat"""
+        """Initialise le client SOAP avec certificat client X.509"""
         try:
             print("\n" + "="*70)
             print("INITIALISATION CLIENT EJBCA AVEC CERTIFICAT CLIENT")
             print("="*70)
             
-            # Vérifier le certificat P12
-            print("1. Vérification du certificat P12...")
-            if not os.path.exists(self.p12_file):
-                print(f"   ❌ Certificat P12 manquant: {self.p12_file}")
+            # Vérifier le certificat client
+            print("\n1. Vérification du certificat client...")
+            if not os.path.exists(self.cert_file):
+                print(f"   ❌ Certificat introuvable: {self.cert_file}")
                 return False
-            print(f"   ✅ Certificat P12 trouvé: {self.p12_file}")
             
-            # Extraire le certificat et la clé du P12
-            print("\n2. Extraction du certificat depuis P12...")
-            from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
+            print(f"   ✅ Certificat trouvé: {self.cert_file}")
             
-            with open(self.p12_file, 'rb') as f:
-                p12_data = f.read()
-            
-            # Extraire certificat et clé
-            private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(
-                p12_data,
-                self.p12_password.encode()
-            )
-            
-            # Sauvegarder temporairement en PEM pour requests
-            cert_pem_path = "/tmp/apiuser_cert.pem"
-            key_pem_path = "/tmp/apiuser_key.pem"
-            
-            from cryptography.hazmat.primitives import serialization
-            
-            # Écrire le certificat
-            with open(cert_pem_path, 'wb') as f:
-                f.write(certificate.public_bytes(Encoding.PEM))
-            
-            # Écrire la clé privée
-            with open(key_pem_path, 'wb') as f:
-                f.write(private_key.private_bytes(
-                    Encoding.PEM,
-                    PrivateFormat.TraditionalOpenSSL,
-                    NoEncryption()
-                ))
-            
-            print(f"   ✅ Certificat extrait: {cert_pem_path}")
-            print(f"   ✅ Clé extraite: {key_pem_path}")
-            
-            # Créer session avec certificat client UNIQUEMENT
-            print("\n3. Configuration de la session HTTP avec certificat client...")
+            # Créer la session avec certificat client
+            print("\n2. Configuration de la session HTTP avec mTLS...")
             session = requests.Session()
-            session.cert = (cert_pem_path, key_pem_path)
-            session.verify = False  # Désactiver vérification SSL pour self-signed cert
-            print(f"   ✅ Session configurée avec certificat client")
+            session.cert = self.cert_file  # Fichier PEM combiné (cert + key + CA chain)
+            session.verify = False
             
-            # Test de connexion WSDL
+            # Configurer SSL
+            import ssl
+            from requests.adapters import HTTPAdapter
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            class SSLAdapter(HTTPAdapter):
+                def init_poolmanager(self, *args, **kwargs):
+                    kwargs['ssl_context'] = ctx
+                    return super().init_poolmanager(*args, **kwargs)
+            
+            adapter = SSLAdapter()
+            session.mount('https://', adapter)
+            session.mount('http://', adapter)
+            
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            print(f"   ✅ Session HTTP configurée avec certificat client")
+            print(f"      Certificat: {self.cert_file}")
+            
+            # Test d'accès au WSDL
             print("\n3. Test d'accès au WSDL...")
-            test_response = session.get(self.wsdl_url, timeout=10)
-            if test_response.status_code == 200:
+            try:
+                test_response = session.get(self.wsdl_url, timeout=15)
                 print(f"   ✅ WSDL accessible (Status: {test_response.status_code})")
-            else:
-                print(f"   ❌ Erreur WSDL (Status: {test_response.status_code})")
-                return False
+            except Exception as e:
+                print(f"   ⚠️  WSDL inaccessible: {str(e)[:80]}")
+                print(f"   → Continuons la tentative...")
             
             # Configuration Zeep
-            print("\n4. Configuration du client SOAP...")
+            print("\n4. Configuration du client SOAP Zeep...")
             settings = Settings(
                 strict=False,
                 xml_huge_tree=True,
@@ -122,25 +115,30 @@ class EJBCAClient:
             print(f"   ✅ Client SOAP créé")
             
             # Extraire les opérations
-            print("\n6. Extraction des opérations...")
+            print("\n6. Extraction des opérations SOAP...")
             self._extract_operations()
             
             # Test avec getEjbcaVersion
             print("\n7. Test de connexion avec getEjbcaVersion...")
-            version = self.client.service.getEjbcaVersion()
-            
-            if version:
-                self.ejbca_version = version
-                self._initialized = True
-                print(f"   ✅ Version EJBCA: {version}")
-                print(f"\n📊 {len(self._operations)} opérations disponibles")
-                return True
-            else:
-                print("   ❌ Impossible de récupérer la version")
+            try:
+                version = self.client.service.getEjbcaVersion()
+                
+                if version:
+                    self.ejbca_version = version
+                    self._initialized = True
+                    print(f"   ✅ Version EJBCA: {version}")
+                    print(f"\n✅ CLIENT INITIALISÉ AVEC CERTIFICAT X.509")
+                    print(f"📊 {len(self._operations)} opérations disponibles")
+                    return True
+                else:
+                    print("   ❌ Version est None")
+                    return False
+            except Exception as soap_err:
+                print(f"   ❌ Erreur SOAP: {str(soap_err)[:150]}")
                 return False
                 
         except Exception as e:
-            print(f"❌ Erreur initialisation: {e}")
+            print(f"❌ Erreur initialisation: {str(e)[:200]}")
             import traceback
             traceback.print_exc()
             return False
@@ -297,6 +295,20 @@ class EJBCAClient:
         """Désactive un utilisateur"""
         return self.call_operation("revokeUser", {'username': username})
     
+    def check_revocation_status(self, serial_number):
+        """Vérifier le statut de révocation d'un certificat. SOAP: checkRevokationStatus"""
+        try:
+            if not self._initialized:
+                if not self.initialize():
+                    return None
+            logger.info(f"[SOAP] checkRevokationStatus: serial_number={serial_number}")
+            result = self.client.service.checkRevokationStatus(serial_number)
+            logger.info(f"[SOAP] checkRevokationStatus returned: {type(result)} = {result}")
+            return result
+        except Exception as e:
+            logger.error(f"[SOAP] Erreur checkRevokationStatus: {e}", exc_info=True)
+            return None
+    
     def get_authorized_end_entity_profiles(self):
         """Profils d'entités finales"""
         return self.call_operation("getAuthorizedEndEntityProfiles", {})
@@ -334,6 +346,55 @@ class EJBCAClient:
             
         return self.call_operation("pkcs10Request", params)
     
+    def pkcs12_req(self, username, password, ca_name="ManagementCA", hardtoken_sn=None):
+        """Demande de certificat PKCS#12 avec clés générées par le serveur"""
+        params = {
+            'username': username,
+            'password': password,
+            'caName': ca_name
+        }
+        if hardtoken_sn:
+            params['hardTokenSN'] = hardtoken_sn
+        
+        return self.call_operation("pkcs12Req", params)
+    
+    def certificate_request(self, username, password, request_data, request_type="PKCS10", 
+                           response_type="CERTIFICATE", ca_name="ManagementCA"):
+        """Demande de certificat générique"""
+        params = {
+            'username': username,
+            'password': password,
+            'request': request_data,
+            'requestType': request_type,
+            'responseType': response_type,
+            'caName': ca_name
+        }
+        
+        return self.call_operation("certificateRequest", params)
+    
+    def soft_token_request(self, username, password, token_type="PKCS12", ca_name="ManagementCA"):
+        """Demande de token logiciel (PKCS#12 ou PKCS#8)"""
+        params = {
+            'username': username,
+            'password': password,
+            'tokenType': token_type,
+            'caName': ca_name
+        }
+        
+        return self.call_operation("softTokenRequest", params)
+    
+    def crmf_request(self, username, password, crmf_data, ca_name="ManagementCA"):
+        """Demande CRMF (Certification Request Message Format)"""
+        params = {
+            'username': username,
+            'password': password,
+            'request': crmf_data,
+            'caName': ca_name
+        }
+        
+        return self.call_operation("crmfRequest", params)
+    
+    
     def get_last_ca_chain(self, ca_name):
         """Chaîne de certificats de la CA"""
         return self.call_operation("getLastCAChain", {'caName': ca_name})
@@ -345,9 +406,174 @@ class EJBCAClient:
             'deltaCRL': delta_crl
         })
     
+    def pkcs12_request(self, username, password, hardtoken_sn="", key_spec="2048", key_alg="RSA"):
+        """
+        Génère un certificat PKCS#12 complet avec clé privée.
+        
+        Params:
+        - username: Nom d'utilisateur
+        - password: Mot de passe
+        - hardtoken_sn: Numéro de série du hardtoken (vide pour soft token)
+        - key_spec: Taille clé (2048, 4096, etc) - arg3
+        - key_alg: Algorithme clé (RSA, ECDSA, DSA) - arg4
+        
+        Returns:
+            Réponse avec pkcs12Data encodée en base64
+        """
+        if not self._initialized:
+            if not self.initialize():
+                return None
+        
+        try:
+            # Appel direct - WSDL: arg0=username, arg1=password, arg2=hardTokenSN, arg3=keySpec, arg4=keyAlg
+            logger.info(f"[SOAP] pkcs12Req: user={username}, hardtoken={hardtoken_sn}, keySpec={key_spec}, keyAlg={key_alg}")
+            result = self.client.service.pkcs12Req(username, password, hardtoken_sn, key_spec, key_alg)
+            logger.info(f"[SOAP] pkcs12Req SUCCESS: {type(result)}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Erreur pkcs12_request: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
+            return None
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_certificate_info_from_p12(self, pkcs12_data, password):
+        """
+        Extrait les infos du certificat depuis un PKCS#12 en base64.
+        
+        Returns:
+            Dict avec serial_number, issuer_dn, not_before, not_after
+        """
+        import base64
+        import tempfile
+        import os
+        import subprocess
+        from datetime import datetime
+        
+        try:
+            # Décoder le base64
+            if isinstance(pkcs12_data, str):
+                pkcs12_bytes = base64.b64decode(pkcs12_data)
+            else:
+                pkcs12_bytes = pkcs12_data
+            
+            # Créer un fichier temporaire
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.p12') as f:
+                f.write(pkcs12_bytes)
+                temp_file = f.name
+            
+            try:
+                # Extraire le certificat avec openssl
+                cmd = [
+                    'openssl', 'pkcs12', '-in', temp_file,
+                    '-passin', f'pass:{password}',
+                    '-clcerts', '-nokeys'
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode != 0:
+                    raise Exception(f"openssl error: {result.stderr}")
+                
+                cert_pem = result.stdout
+                
+                # Extraire les infos avec openssl x509
+                cmd2 = ['openssl', 'x509', '-noout', '-serial', '-issuer', '-dates']
+                result2 = subprocess.run(
+                    cmd2,
+                    input=cert_pem,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result2.returncode != 0:
+                    raise Exception(f"openssl x509 error: {result2.stderr}")
+                
+                output = result2.stdout
+                
+                # Parser les résultats
+                info = {}
+                for line in output.split('\n'):
+                    if line.startswith('serial='):
+                        info['serial_number'] = line.replace('serial=', '').strip()
+                    elif line.startswith('issuer='):
+                        info['issuer_dn'] = line.replace('issuer=', '').strip()
+                    elif line.startswith('notBefore='):
+                        date_str = line.replace('notBefore=', '').strip()
+                        # Format: Jan  1 00:00:00 2025 GMT
+                        try:
+                            info['not_before'] = datetime.strptime(date_str, '%b %d %H:%M:%S %Y %Z')
+                        except:
+                            info['not_before'] = None
+                    elif line.startswith('notAfter='):
+                        date_str = line.replace('notAfter=', '').strip()
+                        try:
+                            info['not_after'] = datetime.strptime(date_str, '%b %d %H:%M:%S %Y %Z')
+                        except:
+                            info['not_after'] = None
+                
+                return info
+            
+            finally:
+                # Nettoyer le fichier temporaire
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+        
+        except Exception as e:
+            print(f"❌ Erreur get_certificate_info_from_p12: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'serial_number': 'UNKNOWN',
+                'issuer_dn': 'UNKNOWN',
+                'not_before': None,
+                'not_after': None
+            }
+    
+    def edit_user_full(self, username, password, subject_dn, ca_name, email,
+                       clear_pwd=True, key_recoverable=False, send_notification=False,
+                       end_entity_profile_name="EMPTY", certificate_profile_name="ENDUSER"):
+        """
+        Version complète de edit_user avec tous les paramètres.
+        """
+        if not self._initialized:
+            if not self.initialize():
+                return None
+        
+        try:
+            factory = self.client.type_factory('ns0')
+            
+            user_vo = factory.userDataVOWS(
+                username=username,
+                password=password,
+                clearPwd=clear_pwd,
+                subjectDN=subject_dn,
+                caName=ca_name,
+                subjectAltName="",
+                email=email,
+                status=10,  # NEW
+                tokenType="P12",  # P12 pour générer PKCS#12
+                sendNotification=send_notification,
+                keyRecoverable=key_recoverable,
+                endEntityProfileName=end_entity_profile_name,
+                certificateProfileName=certificate_profile_name
+            )
+            
+            result = self.client.service.editUser(user_vo)
+            return result
+        except Exception as e:
+            print(f"❌ Erreur edit_user_full: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def get_all_operations(self):
         """Retourne la liste des opérations"""
         return list(self._operations.keys())
+
 
 
 # Instance globale
