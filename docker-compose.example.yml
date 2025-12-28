@@ -1,0 +1,103 @@
+# ⚠️ EXEMPLE UNIQUEMENT - Copier en docker-compose.prod.yml et remplir avec vos secrets
+# NE JAMAIS COMMITTER DE SECRETS DANS DOCKER-COMPOSE!
+
+services:
+  mariadb:
+    image: mariadb:10.6
+    container_name: ejbca-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - ejbca-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ejbca-ca:
+    image: keyfactor/ejbca-ce:9.1.1
+    container_name: ejbca-ca
+    environment:
+      DATABASE_JDBC_URL: jdbc:mariadb://mariadb:3306/${MARIADB_DATABASE}
+      DATABASE_USER: ${MARIADB_USER}
+      DATABASE_PASSWORD: ${MARIADB_PASSWORD}
+      LOG_AUDIT_TO_DB: 'true'
+      EJBCA_ADMIN_PASSWORD: ${EJBCA_ADMIN_PASSWORD}
+      FORCE_CLIENTAUTH: 'true'
+      ENABLE_HEALTCHECK_OVER_HTTP: 'true'
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - ejbca_data:/var/lib/ejbca
+      - ./certs/:/certs/:ro
+    networks:
+      - ejbca-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "https://localhost:8443/ejbca/publicweb/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ejbca-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ejbca-api
+    depends_on:
+      ejbca-ca:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: 3306
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      # API
+      SECRET_KEY: ${SECRET_KEY}
+      API_PORT: 8000
+      API_HOST: 0.0.0.0
+      # EJBCA
+      EJBCA_HOST: ejbca-ca
+      EJBCA_PORT: 8443
+      EJBCA_PROTOCOL: https
+      EJBCA_CLIENT_CERT: /certs/ADMIN_complete.pem
+      EJBCA_CLIENT_KEY: /certs/ADMIN_key.pem
+      # Debug/Prod
+      DEBUG: "False"
+      LOG_LEVEL: ${LOG_LEVEL}
+    volumes:
+      - ./app:/app/app:ro
+      - ./certs/:/certs/:ro
+    networks:
+      - ejbca-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mariadb_data:
+  ejbca_data:
+
+networks:
+  ejbca-network:
+    driver: bridge

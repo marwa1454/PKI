@@ -3,10 +3,10 @@ services:
     image: mariadb:10.6
     container_name: ejbca-mariadb
     environment:
-      MARIADB_ROOT_PASSWORD: ejbca
-      MARIADB_DATABASE: ejbca
-      MARIADB_USER: ejbca
-      MARIADB_PASSWORD: ejbca
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-ejbca}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-ejbca}
+      MARIADB_USER: ${MARIADB_USER:-ejbca}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-ejbca}
     ports:
       - "3307:3306"
     volumes:
@@ -24,11 +24,11 @@ services:
     image: keyfactor/ejbca-ce:9.1.1
     container_name: ejbca-ca
     environment:
-      DATABASE_JDBC_URL: jdbc:mariadb://mariadb:3306/ejbca
-      DATABASE_USER: ejbca
-      DATABASE_PASSWORD: ejbca
+      DATABASE_JDBC_URL: jdbc:mariadb://mariadb:3306/${MARIADB_DATABASE:-ejbca}
+      DATABASE_USER: ${MARIADB_USER:-ejbca}
+      DATABASE_PASSWORD: ${MARIADB_PASSWORD:-ejbca}
       LOG_AUDIT_TO_DB: 'true'
-      EJBCA_ADMIN_PASSWORD: ejbca123
+      EJBCA_ADMIN_PASSWORD: ${EJBCA_ADMIN_PASSWORD:-ejbca123}
       FORCE_CLIENTAUTH: 'true'
       ENABLE_HEALTCHECK_OVER_HTTP: 'true'
     ports:
