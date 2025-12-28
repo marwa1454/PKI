@@ -1,5 +1,3 @@
-
-
 services:
   mariadb:
     image: mariadb:10.6
@@ -100,4 +98,5 @@ volumes:
 networks:
   ejbca-network:
     driver: bridge
+
 
