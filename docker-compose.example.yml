@@ -1,5 +1,4 @@
-# ⚠️ EXEMPLE UNIQUEMENT - Copier en docker-compose.prod.yml et remplir avec vos secrets
-# NE JAMAIS COMMITTER DE SECRETS DANS DOCKER-COMPOSE!
+
 
 services:
   mariadb:
@@ -101,3 +100,4 @@ volumes:
 networks:
   ejbca-network:
     driver: bridge
+
